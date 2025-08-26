@@ -1,0 +1,183 @@
+services:
+  server:
+    container_name: server_container
+    build: 
+      context: .
+      dockerfile: ./cmd/main/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "${SERVER_PORT}:${SERVER_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka1:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      producer:
+        condition: service_started
+    environment:
+      - POSTGRES_DSN=${POSTGRES_DSN}
+      - REDIS_DSN=${REDIS_DSN}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+    restart: on-failure
+  
+  producer:
+    container_name: producer_container
+    build: 
+      context: .
+      dockerfile: ./cmd/producer/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "${PRODUCER_PORT}:${PRODUCER_PORT}"
+    depends_on:
+      kafka1:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:latest
+    container_name: postgres_container
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5430:${POSTGRES_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  migrate:
+    image: migrate/migrate
+    container_name: migrate_container
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DSN: ${POSTGRES_DSN}
+    volumes:
+      - ./storage/migrations:/migrations  
+    command: 
+      - "-path=/migrations"
+      - "-database=${POSTGRES_DSN}"
+      - "up"
+
+  redis:
+    image: redis:alpine
+    container_name: redis_container
+    ports:
+      - "${REDIS_PORT}:${REDIS_PORT}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-p", "${REDIS_PORT}","ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper_container 
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT}
+      ZOOKEEPER_TICK_TIME: ${ZOOKEEPER_TICK_TIME}
+    ports:
+      - "${ZOOKEEPER_PORT}:${ZOOKEEPER_PORT}"
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "${ZOOKEEPER_PORT}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  kafka1:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka1_container
+    depends_on:
+      - zookeeper
+    ports:
+      - "${KAFKA1_PORT}:${KAFKA1_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka1:29091,PLAINTEXT_HOST://localhost:${KAFKA1_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck:
+      test: [ "CMD", "kafka-topics", "--bootstrap-server", "localhost:29091", "--list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  kafka2:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka2_container
+    depends_on:
+      - zookeeper
+    ports:
+      - "${KAFKA2_PORT}:${KAFKA2_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:29092,PLAINTEXT_HOST://localhost:${KAFKA2_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck:
+      test: [ "CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  kafka3:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka3_container
+    depends_on:
+      - zookeeper
+    ports:
+      - "${KAFKA3_PORT}:${KAFKA3_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka3:29093,PLAINTEXT_HOST://localhost:${KAFKA3_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck:
+      test: [ "CMD", "kafka-topics", "--bootstrap-server", "localhost:29093", "--list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui_container
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+    ports:
+      - "9020:9020"
+    environment:
+      AUTH_TYPE: DISABLED
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:29091,kafka2:29092,kafka3:29093
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:${ZOOKEEPER_PORT}
+      SERVER_PORT: 9020
+
+volumes:
+  redis_data:
+  postgres_data:

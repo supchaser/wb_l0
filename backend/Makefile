@@ -8,8 +8,10 @@ build:
 run: build
 	@echo "Starting application..."
 	@$(BUILD_DIR)/app
+
 TEST_PKGS := $(shell go list ./... | \
-    grep -v /mocks)
+    grep -v /mocks | \
+	grep -v /producer)
 
 run_tests:
 	@echo "==> Running tests..."
@@ -26,4 +28,25 @@ clean:
 	@echo "==> Cleaning up..."
 	@rm -rf $(BUILD_DIR)
 
-.PHONY: build run test clean
+
+docker_build:
+	@echo "==> Building Docker images..."
+	docker-compose build
+
+docker_up:
+	@echo "==> Starting containers..."
+	docker-compose up
+
+docker_down:
+	@echo "==> Stopping containers..."
+	docker-compose down
+
+docker_restart: docker_down docker_up
+
+docker_logs:
+	@echo "==> Showing logs..."
+	docker-compose logs -f
+
+docker_rebuild: docker_down docker_build docker_up
+
+.PHONY: build run test clean docker_build docker_up docker_down docker_restart docker_logs docker_rebuild

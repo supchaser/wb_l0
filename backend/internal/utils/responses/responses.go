@@ -2,12 +2,16 @@ package responses
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/supchaser/wb_l0/internal/utils/errs"
 	"github.com/supchaser/wb_l0/internal/utils/logger"
 	"go.uber.org/zap"
 )
+
+var jsonMarshal = json.Marshal
 
 type BadResponse struct {
 	Status int    `json:"status"`
@@ -23,7 +27,7 @@ func DoBadResponseAndLog(w http.ResponseWriter, statusCode int, message string) 
 		Text:   message,
 	}
 
-	jsonResponse, err := json.Marshal(response)
+	jsonResponse, err := jsonMarshal(response)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -68,9 +72,12 @@ func DoJSONResponse(w http.ResponseWriter, responseData interface{}, successStat
 
 func ResponseErrorAndLog(w http.ResponseWriter, err error, funcName string) {
 	switch {
-
+	case errors.Is(err, errs.ErrNotFound):
+		DoBadResponseAndLog(w, http.StatusNotFound, "order not found")
+	case errors.Is(err, errs.ErrValidation):
+		DoBadResponseAndLog(w, http.StatusBadRequest, "invalid request data")
 	default:
-		DoBadResponseAndLog(w, http.StatusInternalServerError, "internal error")
+		DoBadResponseAndLog(w, http.StatusInternalServerError, "internal server error")
 		logger.Error(funcName,
 			zap.String("error", err.Error()),
 		)
