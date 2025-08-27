@@ -102,3 +102,185 @@ GET http://localhost:8081/order/<order_uid> должен вернуть JSON с 
    "oof_shard": "1"
 }
 ```
+
+# Решение
+
+### Архитектура проекта на бэкенде
+
+- Чистая архитектура с разделением на слои:
+
+```
+   cmd/            
+      main/        → Точка входа для основного приложения (main)
+      producer/    → Точка входа для фейкового продюсера
+   internal/
+      app/            → Ядро приложения
+         delivery/    → GraphQL-роуты
+         usecase/     → Бизнес-логика
+         repository/  → Хранилища (PostgreSQL + in-memory)
+         mocks/       → Моки для тестов
+         models/      → Модели
+      config/         → Конфигурация
+      middleware/     → Мидлвари
+      utils/          → Вспомогательные утилиты
+      kafka/          → Логика по работе с Кафкой
+   storage/        → Миграции
+```
+
+### Кэш
+
+В качестве инструмента для кэширования и последующего быстрого доступа используется Redis.
+
+В Redis сохраняю при получении пользователем заказа по UID. До этого момента в Кэш ничего не сохраняется. Данные в кэше хранятся 7 дней.
+
+### Kafka
+
+Три брокера Кафки: 1 лидер и два ведомых. Это необходимо для создания нескольких партиций и для репликации. 
+
+Для визуализации сообщений, топиков и других полезных данных подключил контейнер kafka-ui.
+
+### API
+
+Получение заказа по UID
+
+- `GET /api/v1/orders/{orderUID}`
+
+- Успешный ответ:
+
+```json
+{
+	"customer_id": "customer222",
+	"date_created": "2025-08-25T10:20:35Z",
+	"delivery": {
+		"address": "Central st., 77",
+		"city": "Saint Petersburg",
+		"email": "test311@example.com",
+		"name": "Sarah Johnson",
+		"phone": "+79012302330",
+		"region": "Moscow Oblast",
+		"zip": "702701"
+	},
+	"delivery_service": "russian-post",
+	"entry": "WBIL",
+	"internal_signature": "",
+	"items": [
+		{
+			"brand": "Huawei",
+			"chrt_id": 1127547,
+			"name": "Tablet",
+			"nm_id": 958951,
+			"price": 20000,
+			"rid": "ab4219087a764ae0btest0",
+			"sale": 2,
+			"size": "3",
+			"status": 202,
+			"total_price": 15600,
+			"track_number": "WBILMTESTTRACK15"
+		},
+		{
+			"brand": "JBL",
+			"chrt_id": 6264093,
+			"name": "Speaker",
+			"nm_id": 2134,
+			"price": 7000,
+			"rid": "ab4219087a764ae0btest1",
+			"sale": 16,
+			"size": "2",
+			"status": 202,
+			"total_price": 5950,
+			"track_number": "WBILMTESTTRACK15"
+		}
+	],
+	"locale": "es",
+	"oof_shard": "0",
+	"order_uid": "b563feb7b2b84b6test15",
+	"payment": {
+		"amount": 6746,
+		"bank": "sberbank",
+		"currency": "EUR",
+		"custom_fee": 0,
+		"delivery_cost": 167,
+		"goods_total": 6246,
+		"payment_dt": 1756117235,
+		"provider": "wbpay",
+		"request_id": "",
+		"transaction": "b563feb7b2b84b6test15"
+	},
+	"shardkey": "0",
+	"sm_id": 78,
+	"track_number": "WBILMTESTTRACK15"
+}
+```
+
+- Ответ с кодом 404:
+
+```json
+{
+	"status": 404,
+	"text": "order not found"
+}
+```
+
+### Настройка окружения
+
+```.env
+# App settings
+LOG_MODE="dev" # prod
+SERVER_PORT="your_server_port"
+
+# PostgreSQL settings
+POSTGRES_USER="your_user_name"
+POSTGRES_PASSWORD="yuor_password"
+POSTGRES_DB="your_db_name"
+POSTGRES_PORT="your_postgres_port"
+POSTGRES_DSN="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable"
+
+# Redis settings
+REDIS_PORT="your_redis_port"
+REDIS_DSN="redis://redis:${REDIS_PORT}/0"
+
+# Zookeeper settings
+ZOOKEEPER_PORT="your_zookeeper_port"
+ZOOKEEPER_TICK_TIME="your_zookeeper_tick_time"
+
+# Kafka settings
+KAFKA1_PORT="your_kafka1_port"
+KAFKA2_PORT="your_kafka2_port"
+KAFKA3_PORT="your_kafka3_port"
+KAFKA_BOOTSTRAP_SERVERS="kafka1:2${KAFKA1_PORT},kafka2:2${KAFKA2_PORT},kafka3:2${KAFKA3_PORT}"
+
+# Producer
+KAFKA_CLIENT_ID="your_kafka_client_id"
+KAFKA_ACKS="your_kafka_acks"
+KAFKA_COMPRESSION_TYPE="your_kafka_compression_type"
+KAFKA_RETRIES="your_kafka_retries"
+KAFKA_BATCH_SIZE="your_kafka_batch_size"
+KAFKA_LINGER_MS="your_kafka_linger_ms"
+KAFKA_ENABLE_IDEMPOTENCE="your_kafka_enable_idempotence"
+PRODUCER_PORT="your_kafka_producer_port"
+TOPIC="your_kafka_topic"
+
+# Consumer
+KAFKA_CONSUMER_GROUP_ID="your_kafka_consumer_group_id"
+KAFKA_AUTO_OFFSET_RESET="your_kafka_auto_offset_reset"
+KAFKA_ENABLE_AUTO_COMMIT="your_kafka_auto_commit"
+```
+
+### Некоторые команды по работе с проектом
+
+`make run` - старт приложения
+
+`make test` - запуск тестов
+
+`make clean` - удалить директорию
+
+`make docker_build` - собрать контейнеры
+
+`make docker_up` - поднять контейнеры
+
+`docker down` - остановить контейнеры
+
+### Тестирование
+
+- ~60% покрытия юнит тестами;
+- для тестирования использовался инструменты `gomock`, `pgxmock`, `redismock`.

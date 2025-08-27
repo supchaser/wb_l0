@@ -28,7 +28,6 @@ clean:
 	@echo "==> Cleaning up..."
 	@rm -rf $(BUILD_DIR)
 
-
 docker_build:
 	@echo "==> Building Docker images..."
 	docker-compose build
